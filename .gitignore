@@ -1,0 +1,31 @@
+# Ignore build directory
+/build/
+
+# Ignore CMake files
+CMakeCache.txt
+CMakeFiles/
+
+# Ignore compiled object files
+*.o
+*.a
+*.so
+*.dll
+
+# Ignore executable files
+*.out
+*.exe
+
+# Ignore temporary files
+*.log
+*.swp
+*.bak
+
+# Ignore VSCode settings (if any)
+.vscode/
+
+# Ignore Rust target directory
+target/
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
