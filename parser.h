@@ -1,45 +1,41 @@
-#include "parser.h"
-#include <cctype>
-#include <stdexcept>
+#ifndef PARSER_H
+#define PARSER_H
 
-Parser::Parser(llvm::LLVMContext &ctx, llvm::Module &mod) 
-    : context(ctx), module(mod), builder(ctx), index(0) {}
+#include <string>
+#include <memory>
+#include <vector>
 
-llvm::Value *Parser::parseExpression(const std::string &expr) {
-    input = expr;
-    index = 0;
-    return parseTerm();
-}
+class ExprAST {
+public:
+    virtual ~ExprAST() = default;
+    virtual llvm::Value* codegen() = 0;
+};
 
-llvm::Value *Parser::parsePrimary() {
-    while (index < input.size() && isspace(input[index])) ++index;
-    if (isdigit(input[index]) || input[index] == '.') {
-        size_t start = index;
-        while (index < input.size() && (isdigit(input[index]) || input[index] == '.')) ++index;
-        double value = std::stod(input.substr(start, index - start));
-        return llvm::ConstantFP::get(builder.getDoubleTy(), value);
-    }
-    throw std::runtime_error("Unexpected token");
-}
+class NumberExprAST : public ExprAST {
+    double Val;
+public:
+    NumberExprAST(double Val) : Val(Val) {}
+    llvm::Value* codegen() override;
+};
 
-llvm::Value *Parser::parseFactor() {
-    llvm::Value *lhs = parsePrimary();
-    while (index < input.size() && (input[index] == '*' || input[index] == '/')) {
-        char op = input[index++];
-        llvm::Value *rhs = parsePrimary();
-        if (op == '*') lhs = builder.CreateFMul(lhs, rhs);
-        else lhs = builder.CreateFDiv(lhs, rhs);
-    }
-    return lhs;
-}
+class BinaryExprAST : public ExprAST {
+    char Op;
+    std::unique_ptr<ExprAST> LHS, RHS;
+public:
+    BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS, std::unique_ptr<ExprAST> RHS)
+        : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+    llvm::Value* codegen() override;
+};
 
-llvm::Value *Parser::parseTerm() {
-    llvm::Value *lhs = parseFactor();
-    while (index < input.size() && (input[index] == '+' || input[index] == '-')) {
-        char op = input[index++];
-        llvm::Value *rhs = parseFactor();
-        if (op == '+') lhs = builder.CreateFAdd(lhs, rhs);
-        else lhs = builder.CreateFSub(lhs, rhs);
-    }
-    return lhs;
-}
+class CallExprAST : public ExprAST {
+    std::string Callee;
+    std::vector<std::unique_ptr<ExprAST>> Args;
+public:
+    CallExprAST(const std::string& Callee, std::vector<std::unique_ptr<ExprAST>> Args)
+        : Callee(Callee), Args(std::move(Args)) {}
+    llvm::Value* codegen() override;
+};
+
+std::unique_ptr<ExprAST> Parse(const std::string& input);
+
+#endif

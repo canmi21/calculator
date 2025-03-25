@@ -1,32 +1,59 @@
-#include <iostream>
-#include <string>
+#include "parser.h"
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Function.h>
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/Support/raw_ostream.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/ExecutionEngine/ExecutionEngine.h>
+#include <llvm/ExecutionEngine/GenericValue.h>
+#include <llvm/ExecutionEngine/MCJIT.h>
 #include <llvm/Support/TargetSelect.h>
-#include <llvm/ExecutionEngine/Orc/LLJIT.h>
-#include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
-#include <llvm/ExecutionEngine/Orc/CompileUtils.h>
-#include <llvm/ExecutionEngine/Orc/ExecutionUtils.h>
-#include "parser.h"
+#include <iostream>
+#include <memory>
+
+llvm::LLVMContext TheContext;
+llvm::IRBuilder<> Builder(TheContext);
+std::unique_ptr<llvm::Module> TheModule;
 
 int main() {
+    std::string input;
+    std::cout << "Enter an expression: ";
+    std::getline(std::cin, input);
+
+    auto AST = Parse(input);
+    if (!AST) {
+        std::cerr << "Failed to parse expression" << std::endl;
+        return 1;
+    }
+
+    TheModule = std::make_unique<llvm::Module>("calculator", TheContext);
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmPrinter();
-    llvm::LLVMContext context;
-    auto jit = cantFail(llvm::orc::LLJITBuilder().create());
-    auto module = std::make_unique<llvm::Module>("calculator", context);
-    llvm::IRBuilder<> builder(context);
 
-    auto exprAST = parseExpression();
-    llvm::Function *func = exprAST->codegen(context, module.get(), builder);
-    module->print(llvm::outs(), nullptr);
+    llvm::FunctionType* FT = llvm::FunctionType::get(Builder.getDoubleTy(), false);
+    llvm::Function* MainFunc = llvm::Function::Create(FT, llvm::Function::ExternalLinkage, "main", TheModule.get());
 
-    cantFail(jit->addIRModule(llvm::orc::ThreadSafeModule(std::move(module), std::make_unique<llvm::LLVMContext>())));
-    auto sym = cantFail(jit->lookup("compute"));
-    auto compute = (double (*)())sym.getAddress();
-    std::cout << compute() << std::endl;
+    llvm::BasicBlock* BB = llvm::BasicBlock::Create(TheContext, "entry", MainFunc);
+    Builder.SetInsertPoint(BB);
+
+    llvm::Value* RetVal = AST->codegen();
+    Builder.CreateRet(RetVal);
+
+    llvm::verifyFunction(*MainFunc);
+    TheModule->print(llvm::outs(), nullptr);
+
+    std::string ErrStr;
+    std::unique_ptr<llvm::ExecutionEngine> EE(
+        llvm::EngineBuilder(std::move(TheModule)).setErrorStr(&ErrStr).create());
+    if (!EE) {
+        std::cerr << "Failed to create ExecutionEngine: " << ErrStr << std::endl;
+        return 1;
+    }
+
+    llvm::Function* MainFuncPtr = EE->FindFunctionNamed("main");
+    llvm::GenericValue Result = EE->runFunction(MainFuncPtr, {});
+    std::cout << "Result: " << Result.DoubleVal << std::endl;
+
     return 0;
 }
