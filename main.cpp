@@ -15,12 +15,11 @@ int main() {
 
     llvm::BasicBlock *entry = llvm::BasicBlock::Create(context, "entry", addFunc);
     builder.SetInsertPoint(entry);
-
+    
     auto arg_it = addFunc->arg_begin();
-    llvm::Value *x = *arg_it;
+    llvm::Value *x = &(*arg_it);
     ++arg_it;
-    llvm::Value *y = *arg_it;
-
+    llvm::Value *y = &(*arg_it);
     llvm::Value *sum = builder.CreateAdd(x, y, "sum");
     builder.CreateRet(sum);
 
