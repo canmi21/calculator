@@ -12,4 +12,4 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_executable(calculator main.cpp)
 
 llvm_map_components_to_libnames(llvm_libs core support)
-target_link_libraries(calculator PRIVATE ${llvm_libs})
+target_link_libraries(calculator PRIVATE LLVM-19)
