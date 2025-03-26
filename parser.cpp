@@ -1,134 +1,114 @@
 #include "parser.h"
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/Module.h>
-#include <llvm/IR/Value.h>
 #include <cctype>
-#include <iostream>
-#include <sstream>
+#include <cmath>
 
-extern llvm::LLVMContext TheContext;
-extern llvm::IRBuilder<> Builder;
-extern std::unique_ptr<llvm::Module> TheModule;
-
-static std::string Input;
-static size_t Pos = 0;
-
-static char CurrentChar() {
-    if (Pos >= Input.size()) return '\0';
-    return Input[Pos];
+Parser::Parser() : builder(context), iter(), end() {
+    module = std::make_unique<llvm::Module>("calc", context);
 }
 
-static void NextChar() {
-    if (Pos < Input.size()) Pos++;
-}
-
-static std::unique_ptr<ExprAST> ParseNumber() {
-    std::string NumStr;
-    while (isdigit(CurrentChar()) || CurrentChar() == '.') {
-        NumStr += CurrentChar();
-        NextChar();
+char Parser::getNextChar() {
+    if (iter != end) {
+        return *iter++;
     }
-    double Val = std::stod(NumStr);
-    return std::make_unique<NumberExprAST>(Val);
+    return '\0';
 }
 
-static std::unique_ptr<ExprAST> ParseParen() {
-    NextChar();
-    auto Expr = ParseExpression();
-    NextChar();
-    return Expr;
-}
-
-static std::unique_ptr<ExprAST> ParseIdentifier() {
-    std::string IdStr;
-    while (isalpha(CurrentChar())) {
-        IdStr += CurrentChar();
-        NextChar();
+void Parser::skipWhitespace() {
+    while (iter != end && std::isspace(*iter)) {
+        ++iter;
     }
-    NextChar();
-    std::vector<std::unique_ptr<ExprAST>> Args;
-    if (CurrentChar() != ')') {
-        while (true) {
-            if (auto Arg = ParseExpression()) {
-                Args.push_back(std::move(Arg));
-            }
-            if (CurrentChar() == ')') break;
-            NextChar();
-        }
-    }
-    NextChar();
-    return std::make_unique<CallExprAST>(IdStr, std::move(Args));
 }
 
-static std::unique_ptr<ExprAST> ParsePrimary() {
-    if (isdigit(CurrentChar())) {
-        return ParseNumber();
-    } else if (CurrentChar() == '(') {
-        return ParseParen();
-    } else if (isalpha(CurrentChar())) {
-        return ParseIdentifier();
-    }
-    return nullptr;
+llvm::Value* Parser::parse(const std::string& input) {
+    iter = input.begin();
+    end = input.end();
+    skipWhitespace();
+    return parseExpression();
 }
 
-static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec, std::unique_ptr<ExprAST> LHS) {
+llvm::Value* Parser::parseExpression() {
+    llvm::Value* left = parseTerm();
     while (true) {
-        char Op = CurrentChar();
-        if (Op != '+' && Op != '-' && Op != '*' && Op != '/') {
-            return LHS;
+        skipWhitespace();
+        char op = *iter;
+        if (op != '+' && op != '-') {
+            break;
         }
-        int TokPrec = (Op == '+' || Op == '-') ? 10 : 20;
-        if (TokPrec < ExprPrec) {
-            return LHS;
+        getNextChar();
+        llvm::Value* right = parseTerm();
+        if (op == '+') {
+            left = builder.CreateFAdd(left, right, "addtmp");
+        } else {
+            left = builder.CreateFSub(left, right, "subtmp");
         }
-        NextChar();
-        auto RHS = ParsePrimary();
-        char NextOp = CurrentChar();
-        int NextPrec = (NextOp == '+' || NextOp == '-') ? 10 : 20;
-        if (TokPrec < NextPrec) {
-            RHS = ParseBinOpRHS(TokPrec + 1, std::move(RHS));
+    }
+    return left;
+}
+
+llvm::Value* Parser::parseTerm() {
+    llvm::Value* left = parseFactor();
+    while (true) {
+        skipWhitespace();
+        char op = *iter;
+        if (op != '*' && op != '/') {
+            break;
         }
-        LHS = std::make_unique<BinaryExprAST>(Op, std::move(LHS), std::move(RHS));
+        getNextChar();
+        llvm::Value* right = parseFactor();
+        if (op == '*') {
+            left = builder.CreateFMul(left, right, "multmp");
+        } else {
+            left = builder.CreateFDiv(left, right, "divtmp");
+        }
+    }
+    return left;
+}
+
+llvm::Value* Parser::parseFactor() {
+    skipWhitespace();
+    if (std::isdigit(*iter) || *iter == '.') {
+        return parseNumber();
+    } else if (*iter == '(') {
+        return parseParenExpr();
+    } else if (std::string(iter, iter + 5) == "sqrt(") {
+        return parseSqrt();
+    } else {
+        return nullptr;
     }
 }
 
-static std::unique_ptr<ExprAST> ParseExpression() {
-    auto LHS = ParsePrimary();
-    return ParseBinOpRHS(0, std::move(LHS));
-}
-
-std::unique_ptr<ExprAST> Parse(const std::string& input) {
-    Input = input;
-    Pos = 0;
-    return ParseExpression();
-}
-
-llvm::Value* NumberExprAST::codegen() {
-    return llvm::ConstantFP::get(TheContext, llvm::APFloat(Val));
-}
-
-llvm::Value* BinaryExprAST::codegen() {
-    llvm::Value* L = LHS->codegen();
-    llvm::Value* R = RHS->codegen();
-    switch (Op) {
-        case '+': return Builder.CreateFAdd(L, R, "addtmp");
-        case '-': return Builder.CreateFSub(L, R, "subtmp");
-        case '*': return Builder.CreateFMul(L, R, "multmp");
-        case '/': return Builder.CreateFDiv(L, R, "divtmp");
-        default: return nullptr;
+llvm::Value* Parser::parseNumber() {
+    std::string numStr;
+    while (iter != end && (std::isdigit(*iter) || *iter == '.')) {
+        numStr += *iter++;
     }
+    double val = std::stod(numStr);
+    return llvm::ConstantFP::get(context, llvm::APFloat(val));
 }
 
-llvm::Value* CallExprAST::codegen() {
-    if (Callee == "sqrt") {
-        llvm::Value* Arg = Args[0]->codegen();
-        llvm::Function* SqrtFn = TheModule->getFunction("sqrt");
-        if (!SqrtFn) {
-            llvm::FunctionType* FT = llvm::FunctionType::get(Builder.getDoubleTy(), {Builder.getDoubleTy()}, false);
-            SqrtFn = llvm::Function::Create(FT, llvm::Function::ExternalLinkage, "sqrt", TheModule.get());
-        }
-        return Builder.CreateCall(SqrtFn, Arg, "sqrttmp");
+llvm::Value* Parser::parseParenExpr() {
+    getNextChar();
+    llvm::Value* expr = parseExpression();
+    skipWhitespace();
+    if (*iter != ')') {
+        return nullptr;
     }
-    return nullptr;
+    getNextChar();
+    return expr;
+}
+
+llvm::Value* Parser::parseSqrt() {
+    iter += 5;
+    llvm::Value* expr = parseExpression();
+    skipWhitespace();
+    if (*iter != ')') {
+        return nullptr;
+    }
+    getNextChar();
+    llvm::Function* sqrtFunc = module->getFunction("sqrt");
+    if (!sqrtFunc) {
+        llvm::FunctionType* ft = llvm::FunctionType::get(builder.getDoubleTy(), {builder.getDoubleTy()}, false);
+        sqrtFunc = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, "sqrt", module.get());
+    }
+    return builder.CreateCall(sqrtFunc, expr, "sqrttmp");
 }

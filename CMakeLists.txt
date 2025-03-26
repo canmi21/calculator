@@ -8,6 +8,9 @@ include_directories(${LLVM_INCLUDE_DIRS})
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+set(CMAKE_C_COMPILER "/usr/bin/gcc")
+set(CMAKE_CXX_COMPILER "/usr/bin/g++")
+
 llvm_map_components_to_libnames(llvm_libs core support)
 
 add_executable(calculator main.cpp parser.cpp)

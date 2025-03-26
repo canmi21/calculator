@@ -2,43 +2,38 @@
 #define PARSER_H
 
 #include <string>
-#include <memory>
-#include <vector>
-#include <llvm/IR/Value.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/IRBuilder.h>
+#include <map>
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/IRBuilder.h"
 
-class ExprAST {
+class Parser {
 public:
-    virtual ~ExprAST() = default;
-    virtual llvm::Value* codegen() = 0;
+    Parser();
+    llvm::Value* parse(const std::string& input);
+
+    llvm::IRBuilder<>& getBuilder() { return builder; }
+    llvm::LLVMContext& getContext() { return context; }
+    std::unique_ptr<llvm::Module>& getModule() { return module; }
+
+private:
+    llvm::LLVMContext context;
+    std::unique_ptr<llvm::Module> module;
+    llvm::IRBuilder<> builder;
+    std::map<std::string, llvm::Value*> namedValues;
+
+    llvm::Value* parseExpression();
+    llvm::Value* parseTerm();
+    llvm::Value* parseFactor();
+    llvm::Value* parseNumber();
+    llvm::Value* parseParenExpr();
+    llvm::Value* parseSqrt();
+
+    std::string::const_iterator iter;
+    std::string::const_iterator end;
+
+    char getNextChar();
+    void skipWhitespace();
 };
 
-class NumberExprAST : public ExprAST {
-    double Val;
-public:
-    NumberExprAST(double Val) : Val(Val) {}
-    llvm::Value* codegen() override;
-};
-
-class BinaryExprAST : public ExprAST {
-    char Op;
-    std::unique_ptr<ExprAST> LHS, RHS;
-public:
-    BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS, std::unique_ptr<ExprAST> RHS)
-        : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
-    llvm::Value* codegen() override;
-};
-
-class CallExprAST : public ExprAST {
-    std::string Callee;
-    std::vector<std::unique_ptr<ExprAST>> Args;
-public:
-    CallExprAST(const std::string& Callee, std::vector<std::unique_ptr<ExprAST>> Args)
-        : Callee(Callee), Args(std::move(Args)) {}
-    llvm::Value* codegen() override;
-};
-
-std::unique_ptr<ExprAST> Parse(const std::string& input);
-
-#endif
+#endif // PARSER_H

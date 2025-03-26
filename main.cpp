@@ -1,62 +1,44 @@
 #include "parser.h"
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/Module.h>
-#include <llvm/ExecutionEngine/Orc/IRCompileLayer.h>
-#include <llvm/ExecutionEngine/Orc/ExecutionSession.h>
-#include <llvm/ExecutionEngine/Orc/ThreadSafeContext.h>
-#include <llvm/Support/TargetSelect.h>
-#include <llvm/Support/Host.h>
-#include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <iostream>
-#include <memory>
-#include <string>
+#include "llvm/ExecutionEngine/ExecutionEngine.h"
+#include "llvm/ExecutionEngine/GenericValue.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/raw_ostream.h"
 
 int main() {
-    llvm::LLVMContext TheContext;
-    llvm::IRBuilder<> Builder(TheContext);
-    auto TheModule = std::make_unique<llvm::Module>("calculator", TheContext);
+    llvm::InitializeNativeTarget();
+    llvm::InitializeNativeTargetAsmPrinter();
+    llvm::InitializeNativeTargetAsmParser();
 
+    Parser parser;
     std::string input;
-    std::cout << "Enter an expression: ";
+    std::cout << "Enter expression: ";
     std::getline(std::cin, input);
 
-    auto AST = Parse(input);
-    if (!AST) {
-        std::cerr << "Failed to parse expression" << std::endl;
+    llvm::FunctionType* ft = llvm::FunctionType::get(parser.getBuilder().getDoubleTy(), false);
+    llvm::Function* func = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, "main", parser.getModule().get());
+    llvm::BasicBlock* bb = llvm::BasicBlock::Create(parser.getContext(), "entry", func);
+    parser.getBuilder().SetInsertPoint(bb);
+
+    llvm::Value* result = parser.parse(input);
+    if (!result) {
+        std::cerr << "Error parsing expression." << std::endl;
         return 1;
     }
 
-    llvm::FunctionType* FT = llvm::FunctionType::get(Builder.getDoubleTy(), false);
-    llvm::Function* MainFunc = llvm::Function::Create(FT, llvm::Function::ExternalLinkage, "main", TheModule.get());
+    parser.getBuilder().CreateRet(result);
+    parser.getModule()->print(llvm::errs(), nullptr);
 
-    llvm::BasicBlock* BB = llvm::BasicBlock::Create(TheContext, "entry", MainFunc);
-    Builder.SetInsertPoint(BB);
-
-    llvm::Value* RetVal = AST->codegen();
-    Builder.CreateRet(RetVal);
-
-    llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>> JIT = llvm::orc::LLJITBuilder().create();
-    if (!JIT) {
-        std::cerr << "Failed to create JIT: " << toString(JIT.takeError()) << std::endl;
+    std::string error;
+    llvm::ExecutionEngine* ee = llvm::EngineBuilder(std::move(parser.getModule())).setErrorStr(&error).create();
+    if (!ee) {
+        std::cerr << "Error creating execution engine: " << error << std::endl;
         return 1;
     }
 
-    auto& JITInstance = *JIT.get();
-    if (auto Err = JITInstance->addIRModule(llvm::orc::ThreadSafeModule(std::move(TheModule), std::make_shared<llvm::orc::ThreadSafeContext>(TheContext)))) {
-        std::cerr << "Error adding module to JIT: " << toString(std::move(Err)) << std::endl;
-        return 1;
-    }
-
-    auto MainSymbol = JITInstance->lookup("main");
-    if (!MainSymbol) {
-        std::cerr << "Error finding 'main' function" << std::endl;
-        return 1;
-    }
-
-    typedef double (*MainFuncType)();
-    MainFuncType MainFuncPtr = reinterpret_cast<MainFuncType>(MainSymbol->getAddress());
-    std::cout << "Result: " << MainFuncPtr() << std::endl;
+    llvm::GenericValue gv = ee->runFunction(func, {});
+    std::cout << "Result: " << gv.DoubleVal << std::endl;
 
     return 0;
 }
