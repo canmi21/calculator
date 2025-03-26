@@ -25,9 +25,12 @@ private:
     llvm::Value* parseExpression();
     llvm::Value* parseTerm();
     llvm::Value* parseFactor();
+    llvm::Value* parsePower();
+    llvm::Value* parseFunction(const std::string& funcName);
     llvm::Value* parseNumber();
     llvm::Value* parseParenExpr();
-    llvm::Value* parseSqrt();
+    llvm::Value* parseConstant();
+    llvm::Value* parseVariable();
 
     std::string::const_iterator iter;
     std::string::const_iterator end;
