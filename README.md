@@ -1,22 +1,53 @@
-## LLVM
-### Build
+# LLVM Calculator Project
+
+This is a simple calculator project built using LLVM, supporting basic mathematical operations and functions.
+
+## Build
+
+To build the project, execute the following commands:
+
 ```bash
 cd build/
 make
 ```
 
-### Run
-```
+## Run
+
+After building, you can run the calculator with the following command:
+
+```bash
 ./calculator
 ```
 
-### Test
-```
-canmi@xyy /o/u/p/c/c/build (main)> ./calculator 
-```
+## Test
 
-```
-Enter expression: ((3 + 5 * sin(pi / 4)) ^ 2 - log(sqrt(16)) * cos(atan(1))) / 3 + pi * e
+### Example
+
+Here is an example of using the calculator:
+
+1. Run the calculator:
+
+   ```bash
+   ./calculator
+   ```
+
+2. Enter the expression:
+
+   ```
+   Enter expression: ((3 + 5 * sin(pi / 4)) ^ 2 - log(sqrt(16)) * cos(atan(1))) / 3 + pi * e
+   ```
+
+3. The calculator will generate the corresponding LLVM IR code and execute it, outputting the result:
+
+   ```
+   Result: 22.4507
+   ```
+
+### LLVM IR Code
+
+Below is an example of the LLVM IR code generated for the above expression:
+
+```llvm
 ; ModuleID = 'calc'
 source_filename = "calc"
 
@@ -38,15 +69,9 @@ entry:
 }
 
 declare double @sin(double)
-
 declare double @pow(double, double)
-
 declare double @sqrt(double)
-
 declare double @log(double)
-
 declare double @atan(double)
-
 declare double @cos(double)
-Result: 22.4507
 ```
