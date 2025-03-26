@@ -4,6 +4,9 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <llvm/IR/Value.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/IRBuilder.h>
 
 class ExprAST {
 public:

@@ -1,22 +1,22 @@
 #include "parser.h"
 #include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/Verifier.h>
-#include <llvm/Support/raw_ostream.h>
 #include <llvm/IR/IRBuilder.h>
-#include <llvm/ExecutionEngine/ExecutionEngine.h>
-#include <llvm/ExecutionEngine/GenericValue.h>
-#include <llvm/ExecutionEngine/MCJIT.h>
+#include <llvm/IR/Module.h>
+#include <llvm/ExecutionEngine/Orc/IRCompileLayer.h>
+#include <llvm/ExecutionEngine/Orc/ExecutionSession.h>
+#include <llvm/ExecutionEngine/Orc/ThreadSafeContext.h>
 #include <llvm/Support/TargetSelect.h>
+#include <llvm/Support/Host.h>
+#include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <iostream>
 #include <memory>
-
-llvm::LLVMContext TheContext;
-llvm::IRBuilder<> Builder(TheContext);
-std::unique_ptr<llvm::Module> TheModule;
+#include <string>
 
 int main() {
+    llvm::LLVMContext TheContext;
+    llvm::IRBuilder<> Builder(TheContext);
+    auto TheModule = std::make_unique<llvm::Module>("calculator", TheContext);
+
     std::string input;
     std::cout << "Enter an expression: ";
     std::getline(std::cin, input);
@@ -27,10 +27,6 @@ int main() {
         return 1;
     }
 
-    TheModule = std::make_unique<llvm::Module>("calculator", TheContext);
-    llvm::InitializeNativeTarget();
-    llvm::InitializeNativeTargetAsmPrinter();
-
     llvm::FunctionType* FT = llvm::FunctionType::get(Builder.getDoubleTy(), false);
     llvm::Function* MainFunc = llvm::Function::Create(FT, llvm::Function::ExternalLinkage, "main", TheModule.get());
 
@@ -40,20 +36,27 @@ int main() {
     llvm::Value* RetVal = AST->codegen();
     Builder.CreateRet(RetVal);
 
-    llvm::verifyFunction(*MainFunc);
-    TheModule->print(llvm::outs(), nullptr);
-
-    std::string ErrStr;
-    std::unique_ptr<llvm::ExecutionEngine> EE(
-        llvm::EngineBuilder(std::move(TheModule)).setErrorStr(&ErrStr).create());
-    if (!EE) {
-        std::cerr << "Failed to create ExecutionEngine: " << ErrStr << std::endl;
+    llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>> JIT = llvm::orc::LLJITBuilder().create();
+    if (!JIT) {
+        std::cerr << "Failed to create JIT: " << toString(JIT.takeError()) << std::endl;
         return 1;
     }
 
-    llvm::Function* MainFuncPtr = EE->FindFunctionNamed("main");
-    llvm::GenericValue Result = EE->runFunction(MainFuncPtr, {});
-    std::cout << "Result: " << Result.DoubleVal << std::endl;
+    auto& JITInstance = *JIT.get();
+    if (auto Err = JITInstance->addIRModule(llvm::orc::ThreadSafeModule(std::move(TheModule), std::make_shared<llvm::orc::ThreadSafeContext>(TheContext)))) {
+        std::cerr << "Error adding module to JIT: " << toString(std::move(Err)) << std::endl;
+        return 1;
+    }
+
+    auto MainSymbol = JITInstance->lookup("main");
+    if (!MainSymbol) {
+        std::cerr << "Error finding 'main' function" << std::endl;
+        return 1;
+    }
+
+    typedef double (*MainFuncType)();
+    MainFuncType MainFuncPtr = reinterpret_cast<MainFuncType>(MainSymbol->getAddress());
+    std::cout << "Result: " << MainFuncPtr() << std::endl;
 
     return 0;
 }
